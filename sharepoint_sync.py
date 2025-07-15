@@ -103,6 +103,76 @@ def fetch_sharepoint_documents_with_acl() -> List[Dict[str, Any]]:
         logger.error(f"Error fetching SharePoint documents: {str(e)}")
         raise
 
+def parse_sharepoint_acl_v2(acl_list: List[str]) -> Dict[str, Any]:
+    """
+    Parse SharePoint Connector V2 ACL structure with enhanced granularity.
+    V2 provides more detailed permission information including permission levels.
+    """
+    try:
+        acl_data = {
+            'allowed_users': [],
+            'allowed_groups': [],
+            'denied_users': [],
+            'denied_groups': [],
+            'permission_levels': {},  # V2 enhancement: track permission levels
+            'inheritance_info': {}    # V2 enhancement: track inheritance
+        }
+        
+        for acl_entry in acl_list:
+            try:
+                # V2 ACL entries are JSON-formatted strings with enhanced structure
+                acl_obj = json.loads(acl_entry) if isinstance(acl_entry, str) else acl_entry
+                
+                principal = acl_obj.get('principal', '')
+                principal_type = acl_obj.get('type', 'user')  # user, group, role
+                permissions = acl_obj.get('permissions', [])
+                access_type = acl_obj.get('access', 'allow')  # allow, deny
+                inheritance = acl_obj.get('inheritance', 'inherited')
+                
+                # Categorize by access type and principal type
+                if access_type.lower() == 'allow':
+                    if principal_type.lower() == 'group':
+                        acl_data['allowed_groups'].append(principal)
+                    else:
+                        acl_data['allowed_users'].append(principal)
+                elif access_type.lower() == 'deny':
+                    if principal_type.lower() == 'group':
+                        acl_data['denied_groups'].append(principal)
+                    else:
+                        acl_data['denied_users'].append(principal)
+                
+                # V2 enhancement: Store permission levels for fine-grained access control
+                acl_data['permission_levels'][principal] = {
+                    'permissions': permissions,
+                    'type': principal_type,
+                    'access': access_type,
+                    'inheritance': inheritance
+                }
+                
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Failed to parse V2 ACL entry: {acl_entry}, error: {str(e)}")
+                continue
+        
+        # Remove duplicates
+        acl_data['allowed_users'] = list(set(acl_data['allowed_users']))
+        acl_data['allowed_groups'] = list(set(acl_data['allowed_groups']))
+        acl_data['denied_users'] = list(set(acl_data['denied_users']))
+        acl_data['denied_groups'] = list(set(acl_data['denied_groups']))
+        
+        return acl_data
+        
+    except Exception as e:
+        logger.error(f"Error parsing SharePoint V2 ACL: {str(e)}")
+        # Return basic structure on error
+        return {
+            'allowed_users': [],
+            'allowed_groups': [],
+            'denied_users': [],
+            'denied_groups': [],
+            'permission_levels': {},
+            'inheritance_info': {}
+        }
+
 def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Extract document content and ACL information from Kendra result item.
@@ -127,7 +197,7 @@ def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str,
             'denied_groups': []
         }
         
-        # Process document attributes
+        # Process document attributes (V2 enhanced structure)
         for attr in kendra_item.get('DocumentAttributes', []):
             key = attr.get('Key', '')
             value = attr.get('Value', {})
@@ -138,8 +208,11 @@ def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str,
             elif 'StringListValue' in value:
                 metadata[key] = value['StringListValue']
                 
-                # Extract ACL information from specific attributes
-                if key == 'sharepoint_allowed_users':
+                # Extract V2 ACL information from enhanced attributes
+                if key == 'sharepoint_acl_v2':
+                    # V2 ACL structure is more comprehensive
+                    acl_data = parse_sharepoint_acl_v2(value['StringListValue'])
+                elif key == 'sharepoint_allowed_users':
                     acl_data['allowed_users'] = value['StringListValue']
                 elif key == 'sharepoint_allowed_groups':
                     acl_data['allowed_groups'] = value['StringListValue']

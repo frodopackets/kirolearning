@@ -181,12 +181,12 @@ resource "aws_secretsmanager_secret_version" "jwt_signing_key" {
   }
 }
 
-# SharePoint Online Data Source
+# SharePoint Online Data Source V2
 resource "aws_kendra_data_source" "sharepoint_connector" {
   index_id    = aws_kendra_index.sharepoint_index.id
-  name        = "sharepoint-online-connector"
+  name        = "sharepoint-online-connector-v2"
   type        = "SHAREPOINT"
-  description = "SharePoint Online connector with ACL synchronization"
+  description = "SharePoint Online connector V2 with enhanced ACL synchronization"
   role_arn    = aws_iam_role.kendra_role.arn
 
   configuration {
@@ -197,27 +197,33 @@ resource "aws_kendra_data_source" "sharepoint_connector" {
       
       secret_arn = aws_secretsmanager_secret.sharepoint_credentials.arn
       
-      # Enable crawling of SharePoint pages
+      # SharePoint Connector V2 Enhanced Features
       crawl_attachments                = false  # Focus on pages, not attachments
-      use_change_log                  = true   # Incremental sync
-      disable_local_groups            = false  # Include local SharePoint groups
+      use_change_log                  = true   # Incremental sync with better performance
+      disable_local_groups            = false  # Include local SharePoint groups for ACL
       
-      # Field mappings for metadata
+      # V2 Enhanced Authentication
+      authentication_type = "HTTP_BASIC"  # V2 supports multiple auth types
+      
+      # V2 Enhanced Content Types
+      document_title_field_name = "Title"
+      
+      # V2 Enhanced Field Mappings with better metadata extraction
       field_mappings {
         data_source_field_name = "Author"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"  # V2 supports milliseconds
         index_field_name      = "sharepoint_author"
       }
       
       field_mappings {
         data_source_field_name = "Created"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         index_field_name      = "sharepoint_created"
       }
       
       field_mappings {
         data_source_field_name = "Modified"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         index_field_name      = "sharepoint_modified"
       }
       
@@ -226,12 +232,47 @@ resource "aws_kendra_data_source" "sharepoint_connector" {
         index_field_name      = "sharepoint_title"
       }
       
-      # ACL configuration - this is key for access control
-      access_control_list_configuration {
-        key_path = "sharepoint_acl"  # Field containing ACL information
+      # V2 Enhanced metadata fields
+      field_mappings {
+        data_source_field_name = "ContentType"
+        index_field_name      = "sharepoint_content_type"
       }
       
-      # VPC configuration for private access
+      field_mappings {
+        data_source_field_name = "FileExtension"
+        index_field_name      = "sharepoint_file_extension"
+      }
+      
+      field_mappings {
+        data_source_field_name = "SiteUrl"
+        index_field_name      = "sharepoint_site_url"
+      }
+      
+      field_mappings {
+        data_source_field_name = "WebUrl"
+        index_field_name      = "sharepoint_web_url"
+      }
+      
+      # V2 Enhanced ACL configuration with better granularity
+      access_control_list_configuration {
+        key_path = "sharepoint_acl_v2"  # V2 ACL field with enhanced structure
+      }
+      
+      # V2 Enhanced inclusion/exclusion patterns
+      inclusion_patterns = [
+        "*/SitePages/*",      # Include all site pages
+        "*/Lists/*",          # Include list items
+        "*/Shared Documents/*" # Include shared documents
+      ]
+      
+      exclusion_patterns = [
+        "*/Forms/*",          # Exclude SharePoint forms
+        "*/Style Library/*",  # Exclude style libraries
+        "*/_catalogs/*",      # Exclude system catalogs
+        "*/bin/*"            # Exclude binary folders
+      ]
+      
+      # V2 Enhanced VPC configuration
       vpc_configuration {
         subnet_ids         = var.private_subnet_ids
         security_group_ids = [var.kendra_security_group_id]
@@ -239,12 +280,13 @@ resource "aws_kendra_data_source" "sharepoint_connector" {
     }
   }
 
-  # Schedule for regular synchronization
+  # V2 Enhanced scheduling with better error handling
   schedule = "cron(0 6 * * ? *)"  # Daily at 6 AM UTC
 
   tags = {
-    Name    = "sharepoint-online-connector"
-    Purpose = "SharePoint Content Sync"
+    Name    = "sharepoint-online-connector-v2"
+    Purpose = "SharePoint Content Sync V2"
+    Version = "V2"
   }
 }
 

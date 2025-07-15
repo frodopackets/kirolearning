@@ -135,6 +135,68 @@ def build_access_control_filters(user_id: str, user_groups: List[str]) -> Dict[s
     # Build complete OR filter
     return {"orAll": or_conditions}
 
+def build_enhanced_access_control_filters_v2(user_id: str, user_groups: List[str], 
+                                            permission_level: str = None) -> Dict[str, Any]:
+    """
+    Build enhanced metadata filters using SharePoint Connector V2 capabilities.
+    Supports permission-level filtering and inheritance-based access control.
+    """
+    or_conditions = []
+    
+    # Standard access conditions (backward compatible)
+    if user_id:
+        or_conditions.extend([
+            {"equals": {"key": "created_by", "value": user_id}},
+            {"equals": {"key": "access_users", "value": user_id}}
+        ])
+    
+    for group in user_groups:
+        or_conditions.append({
+            "equals": {"key": "access_groups", "value": group}
+        })
+    
+    or_conditions.append({
+        "equals": {"key": "classification", "value": "public"}
+    })
+    
+    # V2 Enhanced filtering conditions
+    if permission_level:
+        # Filter by specific permission level (read, contribute, full_control)
+        or_conditions.append({
+            "equals": {"key": f"has_{permission_level}_access", "value": "true"}
+        })
+    
+    # V2 Permission-based filtering
+    and_conditions = []
+    
+    # Add permission summary filtering for more granular control
+    if user_id or user_groups:
+        permission_conditions = []
+        
+        if user_id:
+            permission_conditions.append({
+                "stringContains": {"key": "permission_summary", "value": user_id}
+            })
+        
+        for group in user_groups:
+            permission_conditions.append({
+                "stringContains": {"key": "permission_summary", "value": group}
+            })
+        
+        if permission_conditions:
+            and_conditions.append({"orAll": permission_conditions})
+    
+    # Combine OR and AND conditions for comprehensive filtering
+    if and_conditions:
+        return {
+            "andAll": [
+                {"orAll": or_conditions},
+                *and_conditions
+            ]
+        }
+    else:
+        return {"orAll": or_conditions}
+
 # Example filter for user john.doe@company.com in groups ["finance", "executives"]
 {
   "orAll": [
@@ -210,41 +272,87 @@ The SharePoint sync process captures ACLs from Kendra and converts them to Bedro
 }
 ```
 
-**Step 2: Sync Lambda Converts ACLs to Bedrock Metadata**
+**Step 2: Sync Lambda Converts V2 ACLs to Bedrock Metadata**
 ```python
-def convert_sharepoint_to_bedrock_format(sharepoint_doc):
+def convert_sharepoint_to_bedrock_format_v2(sharepoint_doc):
     """
-    Convert SharePoint ACL data to Bedrock Knowledge Base metadata format.
+    Convert SharePoint Connector V2 ACL data to Bedrock Knowledge Base metadata format.
+    V2 provides enhanced permission granularity and inheritance information.
     """
     acl_data = sharepoint_doc.get('acl_data', {})
+    original_metadata = sharepoint_doc.get('metadata', {})
     
-    # Convert SharePoint ACL to Bedrock metadata
+    # V2 Enhanced metadata with permission levels
     bedrock_metadata = {
-        # Source identification
+        # Source identification (V2 enhanced)
         'source': 'sharepoint',
         'source_type': 'sharepoint_page',
         'sharepoint_uri': sharepoint_doc.get('uri', ''),
         'sharepoint_site': extract_site_from_uri(sharepoint_doc.get('uri', '')),
+        'sharepoint_site_url': original_metadata.get('sharepoint_site_url', ''),
+        'sharepoint_content_type': original_metadata.get('sharepoint_content_type', ''),
         
-        # Content metadata
+        # Content metadata (V2 enhanced with millisecond precision)
         'title': sharepoint_doc.get('title', ''),
-        'author': original_metadata.get('Author', ''),
-        'created_date': original_metadata.get('Created', ''),
-        'modified_date': original_metadata.get('Modified', ''),
+        'author': original_metadata.get('sharepoint_author', ''),
+        'created_date': original_metadata.get('sharepoint_created', ''),
+        'modified_date': original_metadata.get('sharepoint_modified', ''),
         
-        # Access control metadata (converted from SharePoint ACL)
+        # Basic access control metadata (backward compatible)
         'access_users': '|'.join(acl_data.get('allowed_users', [])),
         'access_groups': '|'.join(acl_data.get('allowed_groups', [])),
         'denied_users': '|'.join(acl_data.get('denied_users', [])),
         'denied_groups': '|'.join(acl_data.get('denied_groups', [])),
         
-        # Derived classification and department
-        'classification': determine_classification_from_acl(acl_data),
+        # V2 Enhanced permission-based metadata for advanced filtering
+        'permission_summary': create_permission_summary(acl_data.get('permission_levels', {})),
+        'has_full_control_users': has_permission_level(acl_data, 'full_control'),
+        'has_contribute_access': has_permission_level(acl_data, 'contribute'),
+        'has_read_only_access': has_permission_level(acl_data, 'read'),
+        
+        # V2 Enhanced classification based on permission complexity
+        'classification': determine_classification_from_acl_v2(acl_data),
         'department': extract_department_from_groups(acl_data.get('allowed_groups', [])),
-        'created_by': original_metadata.get('Author', 'system')
+        'created_by': original_metadata.get('sharepoint_author', 'system'),
+        
+        # V2 Permission inheritance tracking
+        'has_inherited_permissions': has_inherited_permissions(acl_data),
+        'has_direct_permissions': has_direct_permissions(acl_data)
     }
     
     return bedrock_metadata
+
+# V2 Helper functions for enhanced filtering capabilities
+def create_permission_summary(permission_levels: Dict[str, Any]) -> str:
+    """Create a summary of permission levels for advanced filtering."""
+    summary_parts = []
+    for principal, details in permission_levels.items():
+        permissions = details.get('permissions', [])
+        if permissions:
+            highest_permission = get_highest_permission(permissions)
+            summary_parts.append(f"{principal}:{highest_permission}")
+    return '|'.join(summary_parts)
+
+def has_permission_level(acl_data: Dict[str, Any], target_permission: str) -> bool:
+    """Check if any principal has the specified permission level."""
+    permission_levels = acl_data.get('permission_levels', {})
+    for details in permission_levels.values():
+        permissions = [p.lower() for p in details.get('permissions', [])]
+        if target_permission.lower() in permissions:
+            return True
+    return False
+
+def has_inherited_permissions(acl_data: Dict[str, Any]) -> bool:
+    """Check if document has inherited permissions."""
+    permission_levels = acl_data.get('permission_levels', {})
+    return any(details.get('inheritance') == 'inherited' 
+              for details in permission_levels.values())
+
+def has_direct_permissions(acl_data: Dict[str, Any]) -> bool:
+    """Check if document has direct (non-inherited) permissions."""
+    permission_levels = acl_data.get('permission_levels', {})
+    return any(details.get('inheritance') == 'direct' 
+              for details in permission_levels.values())
 ```
 
 **Step 3: SharePoint Content Uploaded to S3 with Converted Metadata**
