@@ -1,46 +1,58 @@
-# SharePoint Integration with Kendra - ACL-Based Access Control Guide
+# SharePoint Integration - Unified Bedrock Knowledge Base with V2 Connector
 
-This guide explains how to integrate SharePoint Online with Amazon Kendra for secure, ACL-based document access in your RAG pipeline.
+This guide explains how to integrate SharePoint Online content into your unified Bedrock Knowledge Base using Kendra SharePoint Connector V2 for enhanced ACL-based access control.
 
-## 🔐 How SharePoint ACL Integration Works
+## 🔐 How Unified SharePoint Integration Works
 
-### SharePoint ACL Scanning Process
+### SharePoint V2 ACL-to-Metadata Conversion Process
 
-1. **Automatic ACL Discovery**: Kendra's SharePoint connector automatically scans SharePoint permissions during indexing
-2. **Permission Mapping**: SharePoint users, groups, and permissions are mapped to Kendra's access control format
-3. **Real-time Filtering**: When users query, Kendra filters results based on their actual SharePoint permissions
-4. **Token-Based Authentication**: Uses JWT tokens to verify user identity and group membership
+1. **V2 Enhanced ACL Discovery**: Kendra's SharePoint Connector V2 scans SharePoint permissions with granular detail
+2. **Advanced Permission Mapping**: V2 captures permission levels, inheritance, and principal types
+3. **ACL-to-Metadata Conversion**: Sync Lambda converts SharePoint ACLs to Bedrock metadata format
+4. **Unified Knowledge Base**: SharePoint content joins PDFs in single Bedrock Knowledge Base
+5. **Consistent Filtering**: Same metadata filtering applies to both PDFs and SharePoint content
 
-### ACL Data Structure
+### V2 Enhanced ACL Data Structure
 
-When Kendra indexes SharePoint content, it captures:
+When Kendra SharePoint Connector V2 indexes SharePoint content, it captures enhanced ACL data:
 
 ```json
 {
   "document_id": "sharepoint_page_123",
   "content": "Page content here...",
-  "acl": {
-    "allowed_users": [
-      "john.doe@company.com",
-      "jane.smith@company.com"
-    ],
-    "allowed_groups": [
-      "Finance Team",
-      "Executives",
-      "Project Managers"
-    ],
-    "denied_users": [],
-    "denied_groups": []
-  },
+  "sharepoint_acl_v2": [
+    {
+      "principal": "john.doe@company.com",
+      "type": "user",
+      "permissions": ["read", "contribute", "full_control"],
+      "access": "allow",
+      "inheritance": "inherited"
+    },
+    {
+      "principal": "Finance Team",
+      "type": "group",
+      "permissions": ["read", "contribute"],
+      "access": "allow",
+      "inheritance": "direct"
+    }
+  ],
   "metadata": {
-    "sharepoint_site": "https://company.sharepoint.com/sites/finance",
-    "page_title": "Q4 Financial Report",
-    "author": "john.doe@company.com",
-    "created": "2024-01-15T10:30:00Z",
-    "modified": "2024-01-20T14:45:00Z"
+    "sharepoint_site_url": "https://company.sharepoint.com/sites/finance",
+    "sharepoint_content_type": "Site Page",
+    "sharepoint_author": "john.doe@company.com",
+    "sharepoint_created": "2024-01-15T10:30:00.123Z",
+    "sharepoint_modified": "2024-01-20T14:45:30.456Z"
   }
 }
 ```
+
+### Unified Architecture Flow
+
+1. **Kendra V2 Connector** → Captures enhanced SharePoint ACLs
+2. **SharePoint Sync Lambda** → Converts ACLs to Bedrock metadata
+3. **S3 Upload** → SharePoint content stored with metadata
+4. **Bedrock Ingestion** → Content indexed in unified knowledge base
+5. **Single API Query** → Both PDFs and SharePoint content searchable
 
 ## 🚀 Setup Instructions
 
@@ -103,53 +115,55 @@ Create an Azure AD application for JWT token generation:
 ### Scenario 1: User with Direct Access
 
 ```python
-# User john.doe@company.com queries for financial data
+# User john.doe@company.com queries unified knowledge base for financial data
 query_request = {
     "query": "What are the Q4 revenue numbers?",
     "user_id": "john.doe@company.com",
     "user_groups": ["Finance Team", "Executives"],
-    "sources": ["sharepoint"],
-    "user_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs..."
+    "type": "retrieve_and_generate",
+    "use_caching": True
 }
 
-# Kendra automatically filters to only return documents where:
-# - john.doe@company.com is in allowed_users, OR
-# - "Finance Team" or "Executives" is in allowed_groups
+# Unified Bedrock Knowledge Base automatically filters to return documents where:
+# - john.doe@company.com is in access_users metadata, OR
+# - "Finance Team" or "Executives" is in access_groups metadata
+# - Applies to BOTH PDF documents AND SharePoint content
 ```
 
 ### Scenario 2: User with Group-Based Access
 
 ```python
-# User jane.smith@company.com (member of HR Team)
+# User jane.smith@company.com (member of HR Team) queries unified knowledge base
 query_request = {
     "query": "What are the employee benefits?",
     "user_id": "jane.smith@company.com", 
     "user_groups": ["HR Team", "Managers"],
-    "sources": ["sharepoint"],
-    "user_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs..."
+    "type": "retrieve_and_generate",
+    "use_caching": True
 }
 
-# Only returns SharePoint pages where:
-# - jane.smith@company.com has explicit access, OR
-# - "HR Team" or "Managers" group has access
+# Returns both PDF documents and SharePoint pages where:
+# - jane.smith@company.com has explicit access (access_users metadata), OR
+# - "HR Team" or "Managers" group has access (access_groups metadata)
+# - All results ranked together by relevance in single vector search
 ```
 
-### Scenario 3: Hybrid Search (PDF + SharePoint)
+### Scenario 3: Unified Search (PDF + SharePoint in Single Knowledge Base)
 
 ```python
-# Search both PDF documents and SharePoint content
+# Search unified knowledge base containing both PDFs and SharePoint content
 query_request = {
     "query": "Show me all project documentation",
     "user_id": "project.manager@company.com",
     "user_groups": ["Project Managers", "Engineering"],
-    "sources": ["bedrock", "sharepoint"],  # Search both sources
-    "user_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIs..."
+    "type": "retrieve_and_generate",
+    "use_caching": True
 }
 
-# Returns:
-# - PDF documents from S3/Bedrock (filtered by metadata)
-# - SharePoint pages (filtered by ACL)
-# - Combined and ranked by relevance
+# Single query returns:
+# - PDF documents (source: pdf, filtered by metadata)
+# - SharePoint pages (source: sharepoint, filtered by converted ACL metadata)
+# - All content ranked together by relevance in single vector search
 ```
 
 ## 🛡️ Security Architecture
@@ -185,25 +199,24 @@ sequenceDiagram
 
 ## 📊 Usage Examples
 
-### Basic SharePoint Search
+### Unified Knowledge Base Search
 
 ```python
 import requests
 import json
 from your_auth_module import get_user_jwt_token
 
-def search_sharepoint_content(query, user_id, user_groups):
-    # Get JWT token for the user (from your Azure AD integration)
-    jwt_token = get_user_jwt_token(user_id)
-    
+def search_unified_knowledge_base(query, user_id, user_groups):
+    """
+    Search the unified Bedrock Knowledge Base containing both PDFs and SharePoint content.
+    No need to specify sources - all content is in one knowledge base.
+    """
     api_url = "https://[api-id].execute-api.us-east-1.amazonaws.com/prod/query"
     
     payload = {
         "query": query,
         "user_id": user_id,
         "user_groups": user_groups,
-        "sources": ["sharepoint"],  # Only search SharePoint
-        "user_token": jwt_token,
         "type": "retrieve_and_generate",
         "use_caching": True
     }
@@ -213,32 +226,38 @@ def search_sharepoint_content(query, user_id, user_groups):
     return response.json()
 
 # Example usage
-result = search_sharepoint_content(
+result = search_unified_knowledge_base(
     query="What are the latest HR policies?",
     user_id="employee@company.com",
     user_groups=["All Employees", "HR Team"]
 )
 
-print(f"Found {len(result['citations'])} relevant SharePoint pages")
+# Results include both PDFs and SharePoint content
+print(f"Found {len(result['citations'])} relevant documents")
 for citation in result['citations']:
     for ref in citation['retrievedReferences']:
-        sharepoint_url = ref['location']['sharepoint']['uri']
-        title = ref['metadata']['title']
-        print(f"- {title}: {sharepoint_url}")
+        source = ref['metadata'].get('source', 'unknown')
+        title = ref['metadata'].get('title', 'Untitled')
+        
+        if source == 'sharepoint':
+            sharepoint_url = ref['metadata'].get('sharepoint_uri', '')
+            print(f"- SharePoint: {title} ({sharepoint_url})")
+        elif source == 'pdf':
+            s3_location = ref['location'].get('s3Location', {}).get('uri', '')
+            print(f"- PDF: {title} ({s3_location})")
 ```
 
-### Hybrid Search (PDF + SharePoint)
+### Advanced Search with Source Analysis
 
 ```python
-def search_all_content(query, user_id, user_groups):
-    jwt_token = get_user_jwt_token(user_id)
-    
+def search_with_source_analysis(query, user_id, user_groups):
+    """
+    Search unified knowledge base and analyze results by source type.
+    """
     payload = {
         "query": query,
         "user_id": user_id,
         "user_groups": user_groups,
-        "sources": ["bedrock", "sharepoint"],  # Search both sources
-        "user_token": jwt_token,
         "type": "retrieve_and_generate",
         "use_caching": True
     }
@@ -246,11 +265,22 @@ def search_all_content(query, user_id, user_groups):
     response = make_signed_request(api_url, payload)
     result = response.json()
     
-    # Analyze source distribution
-    bedrock_results = [r for r in result['citations'] if r.get('source') == 'bedrock']
-    sharepoint_results = [r for r in result['citations'] if r.get('source') == 'sharepoint']
+    # Analyze source distribution from unified results
+    pdf_results = []
+    sharepoint_results = []
     
-    print(f"Found {len(bedrock_results)} PDF documents and {len(sharepoint_results)} SharePoint pages")
+    for citation in result.get('citations', []):
+        for ref in citation.get('retrievedReferences', []):
+            source = ref.get('metadata', {}).get('source', 'unknown')
+            if source == 'pdf':
+                pdf_results.append(ref)
+            elif source == 'sharepoint':
+                sharepoint_results.append(ref)
+    
+    print(f"Unified search found:")
+    print(f"- {len(pdf_results)} PDF documents")
+    print(f"- {len(sharepoint_results)} SharePoint pages")
+    print(f"- All ranked together by relevance")
     
     return result
 ```
@@ -293,17 +323,18 @@ aws kendra list-data-source-sync-jobs \
 
 ## 💰 Cost Considerations
 
-### Kendra Pricing
-- **Developer Edition**: $810/month + query costs
-- **Enterprise Edition**: $1,008/month + query costs
-- **Document Storage**: $0.30 per 1,000 documents/month
-- **Queries**: $0.85 per 1,000 queries
+### Unified Architecture Costs
+- **Kendra (ACL Capture Only)**: $810/month Developer Edition for SharePoint ACL extraction
+- **Bedrock Knowledge Base**: Pay-per-query model for unified search
+- **Lambda Sync Processing**: Minimal cost for daily SharePoint sync
+- **S3 Storage**: Standard storage costs for SharePoint content
+- **No Dual Query Costs**: Single knowledge base eliminates duplicate query charges
 
-### Optimization Tips
-- Use Developer Edition for testing/small deployments
-- Implement query caching to reduce costs
-- Monitor and optimize sync frequency
-- Use incremental sync when possible
+### Cost Optimization Benefits
+- **Reduced Query Costs**: Single Bedrock query instead of dual Kendra+Bedrock queries
+- **Efficient Sync**: Daily batch processing minimizes Lambda costs
+- **Prompt Caching**: Up to 90% reduction in Bedrock API costs
+- **Unified Storage**: No duplicate content storage across systems
 
 ## 🚀 Next Steps
 

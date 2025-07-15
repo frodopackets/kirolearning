@@ -12,9 +12,10 @@ This project deploys a **complete CIS-compliant RAG (Retrieval-Augmented Generat
 ### Knowledge Base Layer  
 - **Unified Bedrock Knowledge Base**: Single vector store with Amazon Titan embeddings
 - **OpenSearch Serverless**: Scalable vector database for all document types
-- **SharePoint Content Sync**: Automated sync of SharePoint pages with ACL preservation
+- **SharePoint Connector V2**: Enhanced ACL capture with granular permission tracking
+- **Automated SharePoint Sync**: Daily sync of SharePoint content with ACL-to-metadata conversion
 - **Unified Search**: Single knowledge base containing both PDFs and SharePoint content
-- **Access Control**: Consistent metadata-based filtering for all content types
+- **Enhanced Access Control**: V2 permission-level filtering with inheritance tracking
 
 ### Private API Layer
 - **Private API Gateway**: VPC-only access with Interface VPC endpoints
