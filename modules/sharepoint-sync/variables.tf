@@ -3,6 +3,16 @@ variable "bucket_suffix" {
   type        = string
 }
 
+variable "kendra_index_id" {
+  description = "ID of the Kendra index for SharePoint content"
+  type        = string
+}
+
+variable "kendra_index_arn" {
+  description = "ARN of the Kendra index for SharePoint content"
+  type        = string
+}
+
 variable "knowledge_base_id" {
   description = "ID of the Bedrock Knowledge Base"
   type        = string
@@ -13,23 +23,23 @@ variable "knowledge_base_arn" {
   type        = string
 }
 
-variable "opensearch_collection_endpoint" {
-  description = "OpenSearch Serverless collection endpoint"
+variable "s3_bucket_name" {
+  description = "Name of the S3 bucket for document storage"
   type        = string
 }
 
-variable "opensearch_collection_arn" {
-  description = "ARN of the OpenSearch Serverless collection"
+variable "s3_bucket_arn" {
+  description = "ARN of the S3 bucket for document storage"
+  type        = string
+}
+
+variable "sharepoint_credentials_secret_arn" {
+  description = "ARN of the SharePoint credentials secret"
   type        = string
 }
 
 variable "kms_key_arn" {
   description = "ARN of the KMS key for encryption"
-  type        = string
-}
-
-variable "lambda_zip_path" {
-  description = "Path to the Lambda function ZIP file"
   type        = string
 }
 
@@ -43,13 +53,12 @@ variable "lambda_security_group_id" {
   type        = string
 }
 
-variable "api_gateway_vpc_endpoint_id" {
-  description = "VPC endpoint ID for API Gateway"
+variable "lambda_zip_path" {
+  description = "Path to the Lambda function ZIP file"
   type        = string
 }
 
-variable "kendra_index_id" {
-  description = "ID of the Kendra index for SharePoint content"
+variable "sns_topic_arn" {
+  description = "ARN of the SNS topic for alerts"
   type        = string
-  default     = ""
 }

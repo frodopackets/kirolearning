@@ -10,9 +10,11 @@ This project deploys a **complete CIS-compliant RAG (Retrieval-Augmented Generat
 - **Metadata Extraction**: Automatic access control metadata from file paths
 
 ### Knowledge Base Layer  
-- **Bedrock Knowledge Base**: Vector storage with Amazon Titan embeddings
-- **OpenSearch Serverless**: Scalable vector database for document search
-- **Access Control**: Metadata-based filtering for secure document retrieval
+- **Unified Bedrock Knowledge Base**: Single vector store with Amazon Titan embeddings
+- **OpenSearch Serverless**: Scalable vector database for all document types
+- **SharePoint Content Sync**: Automated sync of SharePoint pages with ACL preservation
+- **Unified Search**: Single knowledge base containing both PDFs and SharePoint content
+- **Access Control**: Consistent metadata-based filtering for all content types
 
 ### Private API Layer
 - **Private API Gateway**: VPC-only access with Interface VPC endpoints
@@ -282,25 +284,53 @@ if __name__ == "__main__":
 
 ## Access Control System
 
-### Metadata-Based Security
+### Dual Metadata Filtering Approach
 
-Documents are automatically tagged with access control metadata:
+The system uses two complementary metadata filtering mechanisms:
 
-- **access_users**: Specific users who can access the document
-- **access_groups**: Groups/departments with access
-- **classification**: public, internal, confidential, restricted
-- **department**: Document owner department
-- **created_by**: User who uploaded the document
+#### 1. **Bedrock Knowledge Base Filtering** (S3 PDFs)
+- **Method**: Custom metadata tags applied during PDF processing
+- **Structure**: Path-based metadata extraction (`input/dept/classification/user/file.pdf`)
+- **Filtering**: Vector search with metadata filters in OpenSearch
+- **Granularity**: User, group, classification, department level
 
-### Query Filtering
+#### 2. **Kendra ACL Filtering** (SharePoint)
+- **Method**: Native SharePoint ACL scanning by Kendra connector
+- **Structure**: Automatic capture of SharePoint permissions during indexing
+- **Filtering**: JWT token-based user context with ACL enforcement
+- **Granularity**: SharePoint-native permissions (site, list, item level)
 
-The orchestration API automatically filters results based on:
-1. User's direct access permissions
-2. User's group memberships  
-3. Document classification levels
-4. Document ownership
+### Metadata Structure Examples
 
-Only documents the user is authorized to see will be returned in query results.
+**PDF Document Metadata:**
+```json
+{
+  "classification": "confidential",
+  "department": "finance", 
+  "created_by": "john.doe@company.com",
+  "access_groups": "finance",
+  "access_users": "john.doe@company.com"
+}
+```
+
+**SharePoint ACL Data:**
+```json
+{
+  "allowed_users": ["john.doe@company.com", "jane.smith@company.com"],
+  "allowed_groups": ["Finance Team", "Executives"],
+  "permissions": [{"principal": "Finance Team", "type": "group", "permissions": ["read", "contribute"]}]
+}
+```
+
+### Query-Time Filtering
+
+The orchestration API automatically applies appropriate filters:
+
+1. **PDF Documents**: Metadata-based OR conditions (user access OR group access OR public classification)
+2. **SharePoint Content**: JWT token validation with ACL enforcement
+3. **Hybrid Queries**: Combined filtering across both sources with unified results
+
+📖 **Detailed Guide**: See `METADATA_FILTERING_GUIDE.md` for comprehensive examples and troubleshooting.
 
 ## Configuration
 

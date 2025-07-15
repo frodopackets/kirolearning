@@ -54,6 +54,11 @@ resource "local_file" "orchestration_api_code" {
   content  = file("${path.module}/orchestration_api.py")
 }
 
+resource "local_file" "sharepoint_sync_code" {
+  filename = "${path.module}/sharepoint_sync.py"
+  content  = file("${path.module}/sharepoint_sync.py")
+}
+
 # Archive Lambda function code
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -67,6 +72,13 @@ data "archive_file" "orchestration_api_zip" {
   source_file = local_file.orchestration_api_code.filename
   output_path = "${path.module}/orchestration_api.zip"
   depends_on  = [local_file.orchestration_api_code]
+}
+
+data "archive_file" "sharepoint_sync_zip" {
+  type        = "zip"
+  source_file = local_file.sharepoint_sync_code.filename
+  output_path = "${path.module}/sharepoint_sync.zip"
+  depends_on  = [local_file.sharepoint_sync_code]
 }
 
 # ============================================================================
@@ -111,6 +123,41 @@ module "knowledge_base" {
   orchestration_api_role_arn    = module.orchestration_api.iam_role_arn
 }
 
+# Kendra SharePoint module - SharePoint connector for ACL extraction
+module "kendra_sharepoint" {
+  source                    = "./modules/kendra-sharepoint"
+  bucket_suffix             = random_id.bucket_suffix.hex
+  kms_key_arn              = module.security.kms_key_arn
+  vpc_id                   = module.networking.vpc_id
+  private_subnet_ids       = module.networking.private_subnet_ids
+  kendra_security_group_id = module.networking.lambda_security_group_id  # Reuse Lambda security group
+  
+  # SharePoint configuration (to be updated with actual URLs)
+  sharepoint_urls = [
+    "https://yourcompany.sharepoint.com/sites/finance",
+    "https://yourcompany.sharepoint.com/sites/hr",
+    "https://yourcompany.sharepoint.com/sites/legal"
+  ]
+}
+
+# SharePoint sync module - Sync SharePoint content to Bedrock Knowledge Base
+module "sharepoint_sync" {
+  source                            = "./modules/sharepoint-sync"
+  bucket_suffix                     = random_id.bucket_suffix.hex
+  kendra_index_id                   = module.kendra_sharepoint.kendra_index_id
+  kendra_index_arn                  = module.kendra_sharepoint.kendra_index_arn
+  knowledge_base_id                 = module.knowledge_base.knowledge_base_id
+  knowledge_base_arn                = module.knowledge_base.knowledge_base_arn
+  s3_bucket_name                    = module.storage.pdf_documents_bucket_name
+  s3_bucket_arn                     = module.storage.pdf_documents_bucket_arn
+  sharepoint_credentials_secret_arn = module.kendra_sharepoint.sharepoint_credentials_secret_arn
+  kms_key_arn                       = module.security.kms_key_arn
+  private_subnet_ids                = module.networking.private_subnet_ids
+  lambda_security_group_id          = module.networking.lambda_security_group_id
+  lambda_zip_path                   = data.archive_file.sharepoint_sync_zip.output_path
+  sns_topic_arn                     = module.security.sns_topic_arn
+}
+
 # Orchestration API module - Private API Gateway + Lambda for queries
 module "orchestration_api" {
   source                          = "./modules/orchestration-api"
@@ -124,6 +171,7 @@ module "orchestration_api" {
   private_subnet_ids              = module.networking.private_subnet_ids
   lambda_security_group_id        = module.networking.lambda_security_group_id
   api_gateway_vpc_endpoint_id     = module.networking.api_gateway_vpc_endpoint_id
+  kendra_index_id                 = module.kendra_sharepoint.kendra_index_id
 }
 
 # ============================================================================
@@ -183,4 +231,29 @@ output "private_subnet_ids" {
 output "api_gateway_vpc_endpoint_dns" {
   value       = module.networking.api_gateway_vpc_endpoint_dns_names
   description = "DNS names for the API Gateway VPC endpoint"
+}
+
+output "kendra_index_id" {
+  value       = module.kendra_sharepoint.kendra_index_id
+  description = "Kendra index ID for SharePoint content"
+}
+
+output "sharepoint_credentials_secret_arn" {
+  value       = module.kendra_sharepoint.sharepoint_credentials_secret_arn
+  description = "ARN of the SharePoint credentials secret (update with actual credentials)"
+}
+
+output "jwt_signing_key_secret_arn" {
+  value       = module.kendra_sharepoint.jwt_signing_key_secret_arn
+  description = "ARN of the JWT signing key secret (update with actual key)"
+}
+
+output "sharepoint_sync_lambda_name" {
+  value       = module.sharepoint_sync.sharepoint_sync_lambda_name
+  description = "Name of the SharePoint sync Lambda function"
+}
+
+output "sync_schedule_rule_name" {
+  value       = module.sharepoint_sync.sync_schedule_rule_name
+  description = "Name of the EventBridge rule for SharePoint sync scheduling"
 }

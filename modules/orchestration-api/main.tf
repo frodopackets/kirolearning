@@ -74,6 +74,15 @@ resource "aws_iam_role_policy" "orchestration_api_policy" {
           "ec2:DetachNetworkInterface"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kendra:Query",
+          "kendra:DescribeIndex",
+          "kendra:ListDataSources"
+        ]
+        Resource = var.kendra_index_id != "" ? "arn:aws:kendra:us-east-1:*:index/${var.kendra_index_id}" : "*"
       }
     ]
   })
@@ -99,6 +108,8 @@ resource "aws_lambda_function" "orchestration_api" {
     variables = {
       KNOWLEDGE_BASE_ID = var.knowledge_base_id
       OPENSEARCH_ENDPOINT = var.opensearch_collection_endpoint
+      KENDRA_INDEX_ID = var.kendra_index_id
+      ENABLE_SHAREPOINT_SEARCH = "true"
       ENABLE_PROMPT_CACHING = "true"
       CACHE_TTL_MINUTES = "60"
     }
