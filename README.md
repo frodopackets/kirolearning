@@ -1,14 +1,42 @@
-# PDF Splitter for Bedrock Data Automation
+# CIS-Compliant PDF Splitter for Bedrock Data Automation
 
-This project deploys a serverless PDF processing solution that prepares documents for downstream Bedrock Data Automation workflows. The system automatically splits PDF documents that exceed 20 pages into smaller chunks suitable for Bedrock Data Automation blueprints.
+This project deploys a **CIS-compliant** serverless PDF processing solution that prepares documents for downstream Bedrock Data Automation workflows. The system automatically splits PDF documents that exceed 20 pages into smaller chunks suitable for Bedrock Data Automation blueprints.
 
 ## Architecture
 
 - **AWS Cloud Control (awscc) Provider**: Uses the latest awscc provider for Terraform
 - **Lambda Function**: Python 3.11 runtime with PyPDF2 for efficient PDF processing
-- **S3 Bucket**: Stores input PDFs and processed outputs
-- **IAM Role**: Provides necessary permissions for S3 access
-- **S3 Event Notifications**: Automatically triggers processing when PDFs are uploaded
+- **S3 Buckets**: Separate buckets for documents and access logs with full encryption
+- **KMS Encryption**: Customer-managed keys with automatic rotation
+- **IAM Role**: Least-privilege permissions following CIS guidelines
+- **CloudWatch**: Comprehensive monitoring and alerting
+- **Dead Letter Queue**: Error handling and message retention
+
+## CIS Compliance Features
+
+### S3 Security (CIS 2.1.x)
+- ✅ **2.1.1** - S3 bucket versioning enabled
+- ✅ **2.1.2** - Server-side encryption with AES-256
+- ✅ **2.1.3** - MFA delete ready (requires root user activation)
+- ✅ **2.1.4** - Access logging to separate encrypted bucket
+- ✅ **2.1.5** - Public access completely blocked
+- ✅ **2.1.6** - HTTPS-only access enforced via bucket policy
+
+### Lambda Security (CIS 3.x)
+- ✅ **3.1** - Environment variables encrypted with KMS
+- ✅ **3.2** - X-Ray tracing enabled for monitoring
+- ✅ **3.3** - Dead letter queue configured for error handling
+
+### Encryption & Key Management
+- ✅ Customer-managed KMS keys with automatic rotation
+- ✅ All data encrypted at rest and in transit
+- ✅ Separate encryption for logs, queues, and environment variables
+
+### Monitoring & Alerting
+- ✅ CloudWatch log groups with retention policies
+- ✅ Performance and error rate alarms
+- ✅ SNS notifications for critical events
+- ✅ Comprehensive resource tagging for compliance tracking
 
 ## Features
 
@@ -17,7 +45,7 @@ This project deploys a serverless PDF processing solution that prepares document
 - Preserves PDFs with ≤20 pages in a processed folder
 - Optimized for downstream Bedrock Data Automation processing
 - Serverless architecture with automatic scaling
-- Comprehensive logging and error handling
+- Enterprise-grade security and compliance controls
 
 ## Deployment
 
