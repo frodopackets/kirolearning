@@ -395,7 +395,7 @@ Access Groups: {doc['metadata']['access_groups']}
 ```
 
 **Step 4: Bedrock Knowledge Base Ingestion**
-After uploading, Bedrock Knowledge Base ingests SharePoint content with the same metadata structure as PDFs:
+After uploading, Bedrock Knowledge Base ingests SharePoint content with metadata converted from V2 template fields:
 
 ```json
 {
@@ -408,10 +408,26 @@ After uploading, Bedrock Knowledge Base ingests SharePoint content with the same
       "source_type": "sharepoint_page",
       "classification": "confidential",
       "department": "finance",
+      
+      // Converted from V2 template ACL fields
       "access_users": "john.doe@company.com|jane.smith@company.com",
       "access_groups": "Finance Team|Executives",
-      "created_by": "john.doe@company.com",
+      "denied_users": "",
+      "denied_groups": "",
+      
+      // V2 template metadata fields
+      "sharepoint_author": "john.doe@company.com",
+      "sharepoint_created": "2024-01-15T10:30:00.123Z",
+      "sharepoint_modified": "2024-01-20T14:45:30.456Z",
+      "sharepoint_title": "Q4 Financial Review",
+      "sharepoint_content_type": "Site Page",
+      "sharepoint_site_url": "https://company.sharepoint.com/sites/finance",
+      "sharepoint_web_url": "https://company.sharepoint.com/sites/finance/SitePages",
+      
+      // Derived fields
       "title": "Q4 Financial Review",
+      "author": "john.doe@company.com",
+      "created_by": "john.doe@company.com",
       "sharepoint_uri": "https://company.sharepoint.com/sites/finance/SitePages/Q4-Review.aspx",
       "sharepoint_site": "finance"
     },
@@ -419,6 +435,25 @@ After uploading, Bedrock Knowledge Base ingests SharePoint content with the same
   }
 }
 ```
+
+### V2 Template Field Mapping
+
+The SharePoint Connector V2 template produces these specific field names:
+
+| V2 Template Field | Converted Bedrock Metadata | Purpose |
+|-------------------|----------------------------|---------|
+| `sharepoint_author` | `author`, `created_by` | Document author |
+| `sharepoint_created` | `created_date` | Creation timestamp (millisecond precision) |
+| `sharepoint_modified` | `modified_date` | Modification timestamp |
+| `sharepoint_title` | `title` | Document title |
+| `sharepoint_content_type` | `content_type` | SharePoint content type |
+| `sharepoint_site_url` | `sharepoint_site_url` | Full site URL |
+| `sharepoint_web_url` | `sharepoint_web_url` | Web URL |
+| `_acl_allowed_users` | `access_users` | Allowed users (pipe-separated) |
+| `_acl_allowed_groups` | `access_groups` | Allowed groups (pipe-separated) |
+| `_acl_denied_users` | `denied_users` | Denied users |
+| `_acl_denied_groups` | `denied_groups` | Denied groups |
+| `_acl_permissions` | `permission_levels` | V2 enhanced permission data |
 
 ## 🔄 Unified Filtering: Single Knowledge Base Query
 

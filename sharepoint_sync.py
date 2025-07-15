@@ -68,40 +68,243 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 def fetch_sharepoint_documents_with_acl() -> List[Dict[str, Any]]:
     """
     Fetch SharePoint documents from Kendra with their ACL information.
+    Uses multiple approaches to ensure we get complete document data and ACL information.
     """
     try:
         documents = []
-        next_token = None
         
-        while True:
-            # Query Kendra to get all SharePoint documents
-            query_params = {
-                'IndexId': KENDRA_INDEX_ID,
-                'QueryText': '*',  # Get all documents
-                'PageSize': 100,
-                'QueryResultTypeFilter': 'DOCUMENT'
-            }
-            
-            if next_token:
-                query_params['PageToken'] = next_token
-            
-            response = kendra_client.query(**query_params)
-            
-            for item in response.get('ResultItems', []):
-                # Extract document with ACL information
-                doc_info = extract_document_with_acl(item)
-                if doc_info:
-                    documents.append(doc_info)
-            
-            next_token = response.get('NextToken')
-            if not next_token:
-                break
+        # Method 1: Use batch_get_document_status to get all SharePoint documents
+        sharepoint_doc_ids = get_sharepoint_document_ids()
+        
+        if sharepoint_doc_ids:
+            # Get full document details with ACL information
+            documents.extend(fetch_documents_by_ids(sharepoint_doc_ids))
+        
+        # Method 2: Fallback to query-based approach with SharePoint-specific filters
+        if not documents:
+            logger.info("No documents found via document IDs, trying query-based approach")
+            documents = fetch_sharepoint_documents_via_query()
+        
+        # Method 3: Direct data source listing (if available)
+        if not documents:
+            logger.info("No documents found via query, trying data source listing")
+            documents = fetch_sharepoint_documents_via_data_source()
         
         return documents
         
     except Exception as e:
         logger.error(f"Error fetching SharePoint documents: {str(e)}")
         raise
+
+def get_sharepoint_document_ids() -> List[str]:
+    """
+    Get all SharePoint document IDs from Kendra index.
+    """
+    try:
+        document_ids = []
+        next_token = None
+        
+        while True:
+            # List all documents in the index
+            list_params = {
+                'IndexId': KENDRA_INDEX_ID,
+                'MaxResults': 100
+            }
+            
+            if next_token:
+                list_params['NextToken'] = next_token
+            
+            response = kendra_client.list_documents(**list_params)
+            
+            for doc_info in response.get('DocumentMetadataConfigurationList', []):
+                # Filter for SharePoint documents based on URI or data source
+                doc_id = doc_info.get('Id', '')
+                if doc_id and is_sharepoint_document(doc_info):
+                    document_ids.append(doc_id)
+            
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
+        
+        return document_ids
+        
+    except Exception as e:
+        logger.warning(f"Error getting SharePoint document IDs: {str(e)}")
+        return []
+
+def is_sharepoint_document(doc_info: Dict[str, Any]) -> bool:
+    """
+    Determine if a document is from SharePoint based on its metadata.
+    """
+    # Check various indicators that this is a SharePoint document
+    indicators = [
+        'sharepoint' in str(doc_info).lower(),
+        '/sites/' in str(doc_info).lower(),
+        '_layouts/' in str(doc_info).lower(),
+        '.sharepoint.com' in str(doc_info).lower()
+    ]
+    return any(indicators)
+
+def fetch_documents_by_ids(document_ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch full document details including ACL information using document IDs.
+    """
+    try:
+        documents = []
+        
+        # Process documents in batches (Kendra has limits on batch operations)
+        batch_size = 10
+        for i in range(0, len(document_ids), batch_size):
+            batch_ids = document_ids[i:i + batch_size]
+            
+            # Get document status and metadata
+            response = kendra_client.batch_get_document_status(
+                IndexId=KENDRA_INDEX_ID,
+                DocumentIdList=batch_ids
+            )
+            
+            for doc_status in response.get('DocumentStatusList', []):
+                if doc_status.get('Status') == 'INDEXED':
+                    # Get full document details with retrieve API
+                    doc_details = retrieve_document_with_acl(doc_status.get('DocumentId'))
+                    if doc_details:
+                        documents.append(doc_details)
+        
+        return documents
+        
+    except Exception as e:
+        logger.warning(f"Error fetching documents by IDs: {str(e)}")
+        return []
+
+def retrieve_document_with_acl(document_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve a single document with full ACL information using the retrieve API.
+    """
+    try:
+        # Use retrieve API to get full document content and metadata
+        response = kendra_client.retrieve(
+            IndexId=KENDRA_INDEX_ID,
+            QueryText=f'_document_id:"{document_id}"',
+            PageSize=1
+        )
+        
+        for item in response.get('ResultItems', []):
+            return extract_document_with_acl(item)
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Error retrieving document {document_id}: {str(e)}")
+        return None
+
+def fetch_sharepoint_documents_via_query() -> List[Dict[str, Any]]:
+    """
+    Fallback method: Fetch SharePoint documents using targeted queries.
+    """
+    try:
+        documents = []
+        
+        # Use specific SharePoint-related queries to find documents
+        sharepoint_queries = [
+            'source:sharepoint',
+            'sharepoint_site_url:*',
+            'sharepoint_web_url:*',
+            '_source_uri:*sharepoint*',
+            '_source_uri:*/sites/*'
+        ]
+        
+        for query_text in sharepoint_queries:
+            next_token = None
+            
+            while True:
+                query_params = {
+                    'IndexId': KENDRA_INDEX_ID,
+                    'QueryText': query_text,
+                    'PageSize': 100,
+                    'QueryResultTypeFilter': 'DOCUMENT',
+                    'AttributeFilter': {
+                        'EqualsTo': {
+                            'Key': '_data_source_id',
+                            'Value': {
+                                'StringValue': get_sharepoint_data_source_id()
+                            }
+                        }
+                    } if get_sharepoint_data_source_id() else None
+                }
+                
+                if next_token:
+                    query_params['PageToken'] = next_token
+                
+                response = kendra_client.query(**query_params)
+                
+                for item in response.get('ResultItems', []):
+                    doc_info = extract_document_with_acl(item)
+                    if doc_info and not any(d['id'] == doc_info['id'] for d in documents):
+                        documents.append(doc_info)
+                
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+        
+        return documents
+        
+    except Exception as e:
+        logger.warning(f"Error fetching SharePoint documents via query: {str(e)}")
+        return []
+
+def get_sharepoint_data_source_id() -> Optional[str]:
+    """
+    Get the SharePoint data source ID from Kendra index.
+    """
+    try:
+        response = kendra_client.list_data_sources(IndexId=KENDRA_INDEX_ID)
+        
+        for data_source in response.get('DataSourceSummaryItems', []):
+            if 'sharepoint' in data_source.get('Name', '').lower():
+                return data_source.get('Id')
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Error getting SharePoint data source ID: {str(e)}")
+        return None
+
+def fetch_sharepoint_documents_via_data_source() -> List[Dict[str, Any]]:
+    """
+    Last resort: Fetch documents by directly querying the SharePoint data source.
+    """
+    try:
+        documents = []
+        sharepoint_ds_id = get_sharepoint_data_source_id()
+        
+        if not sharepoint_ds_id:
+            return documents
+        
+        # Query documents from specific data source
+        response = kendra_client.query(
+            IndexId=KENDRA_INDEX_ID,
+            QueryText='*',
+            AttributeFilter={
+                'EqualsTo': {
+                    'Key': '_data_source_id',
+                    'Value': {
+                        'StringValue': sharepoint_ds_id
+                    }
+                }
+            },
+            PageSize=100
+        )
+        
+        for item in response.get('ResultItems', []):
+            doc_info = extract_document_with_acl(item)
+            if doc_info:
+                documents.append(doc_info)
+        
+        return documents
+        
+    except Exception as e:
+        logger.warning(f"Error fetching SharePoint documents via data source: {str(e)}")
+        return []
 
 def parse_sharepoint_acl_v2(acl_list: List[str]) -> Dict[str, Any]:
     """
@@ -173,6 +376,80 @@ def parse_sharepoint_acl_v2(acl_list: List[str]) -> Dict[str, Any]:
             'inheritance_info': {}
         }
 
+def extract_acl_from_v2_template_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract ACL information from SharePoint Connector V2 template metadata structure.
+    V2 template uses different field names than the legacy connector.
+    """
+    try:
+        acl_data = {
+            'allowed_users': [],
+            'allowed_groups': [],
+            'denied_users': [],
+            'denied_groups': [],
+            'permission_levels': {},
+            'inheritance_info': {}
+        }
+        
+        # V2 template-specific ACL field extraction
+        # The V2 template may store ACL data in different fields
+        
+        # Check for V2 template ACL fields (these are the actual field names from V2 template)
+        if '_acl_allowed_users' in metadata:
+            acl_data['allowed_users'] = metadata['_acl_allowed_users'] if isinstance(metadata['_acl_allowed_users'], list) else [metadata['_acl_allowed_users']]
+        
+        if '_acl_allowed_groups' in metadata:
+            acl_data['allowed_groups'] = metadata['_acl_allowed_groups'] if isinstance(metadata['_acl_allowed_groups'], list) else [metadata['_acl_allowed_groups']]
+        
+        if '_acl_denied_users' in metadata:
+            acl_data['denied_users'] = metadata['_acl_denied_users'] if isinstance(metadata['_acl_denied_users'], list) else [metadata['_acl_denied_users']]
+        
+        if '_acl_denied_groups' in metadata:
+            acl_data['denied_groups'] = metadata['_acl_denied_groups'] if isinstance(metadata['_acl_denied_groups'], list) else [metadata['_acl_denied_groups']]
+        
+        # V2 template permission level extraction
+        if '_acl_permissions' in metadata:
+            try:
+                permissions_data = json.loads(metadata['_acl_permissions']) if isinstance(metadata['_acl_permissions'], str) else metadata['_acl_permissions']
+                if isinstance(permissions_data, dict):
+                    acl_data['permission_levels'] = permissions_data
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Failed to parse V2 template permissions data: {metadata.get('_acl_permissions')}")
+        
+        # Alternative V2 template field names (fallback)
+        if not acl_data['allowed_users'] and not acl_data['allowed_groups']:
+            # Try alternative V2 field names
+            for field_name, acl_key in [
+                ('_allowed_principals', 'allowed_users'),
+                ('_allowed_groups', 'allowed_groups'),
+                ('_denied_principals', 'denied_users'),
+                ('_denied_groups', 'denied_groups')
+            ]:
+                if field_name in metadata:
+                    value = metadata[field_name]
+                    if isinstance(value, list):
+                        acl_data[acl_key] = value
+                    elif isinstance(value, str):
+                        acl_data[acl_key] = [value]
+        
+        # Clean up and deduplicate
+        for key in ['allowed_users', 'allowed_groups', 'denied_users', 'denied_groups']:
+            if acl_data[key]:
+                acl_data[key] = list(set([str(item) for item in acl_data[key] if item]))
+        
+        return acl_data
+        
+    except Exception as e:
+        logger.error(f"Error extracting ACL from V2 template metadata: {str(e)}")
+        return {
+            'allowed_users': [],
+            'allowed_groups': [],
+            'denied_users': [],
+            'denied_groups': [],
+            'permission_levels': {},
+            'inheritance_info': {}
+        }
+
 def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Extract document content and ACL information from Kendra result item.
@@ -197,7 +474,7 @@ def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str,
             'denied_groups': []
         }
         
-        # Process document attributes (V2 enhanced structure)
+        # Process document attributes (V2 template-based structure)
         for attr in kendra_item.get('DocumentAttributes', []):
             key = attr.get('Key', '')
             value = attr.get('Value', {})
@@ -208,22 +485,26 @@ def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str,
             elif 'StringListValue' in value:
                 metadata[key] = value['StringListValue']
                 
-                # Extract V2 ACL information from enhanced attributes
+                # Extract V2 ACL information from template-based attributes
                 if key == 'sharepoint_acl_v2':
-                    # V2 ACL structure is more comprehensive
+                    # V2 template ACL structure is more comprehensive
                     acl_data = parse_sharepoint_acl_v2(value['StringListValue'])
-                elif key == 'sharepoint_allowed_users':
-                    acl_data['allowed_users'] = value['StringListValue']
-                elif key == 'sharepoint_allowed_groups':
-                    acl_data['allowed_groups'] = value['StringListValue']
-                elif key == 'sharepoint_denied_users':
-                    acl_data['denied_users'] = value['StringListValue']
-                elif key == 'sharepoint_denied_groups':
-                    acl_data['denied_groups'] = value['StringListValue']
+                elif key == '_source_uri':
+                    # V2 template uses _source_uri for document URI
+                    metadata['source_uri'] = value['StringValue']
+                elif key == '_category':
+                    # V2 template categorizes content types
+                    metadata['content_category'] = value['StringValue']
             elif 'LongValue' in value:
                 metadata[key] = value['LongValue']
             elif 'DateValue' in value:
                 metadata[key] = value['DateValue'].isoformat() if value['DateValue'] else None
+        
+        # Handle V2 template-specific ACL extraction
+        # V2 template stores ACL data in a structured format
+        if not acl_data['allowed_users'] and not acl_data['allowed_groups']:
+            # Extract ACL from V2 template metadata structure
+            acl_data = extract_acl_from_v2_template_metadata(metadata)
         
         return {
             'id': kendra_item.get('Id', ''),
@@ -239,54 +520,69 @@ def extract_document_with_acl(kendra_item: Dict[str, Any]) -> Optional[Dict[str,
         logger.error(f"Error extracting document ACL: {str(e)}")
         return None
 
+def convert_sharepoint_to_bedrock_format_v2(sharepoint_doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert SharePoint V2 template document with enhanced ACL to Bedrock metadata format.
+    Uses actual V2 template field names from the template configuration.
+    """
+    acl_data = sharepoint_doc.get('acl_data', {})
+    original_metadata = sharepoint_doc.get('metadata', {})
+    
+    # V2 Template Enhanced metadata with actual field names
+    bedrock_metadata = {
+        # Source information (V2 template fields)
+        'source': 'sharepoint',
+        'source_type': 'sharepoint_page',
+        'sharepoint_uri': sharepoint_doc.get('uri', ''),
+        'sharepoint_site_url': original_metadata.get('sharepoint_site_url', ''),
+        'sharepoint_web_url': original_metadata.get('sharepoint_web_url', ''),
+        'sharepoint_content_type': original_metadata.get('sharepoint_content_type', ''),
+        
+        # Content metadata (V2 template actual field names)
+        'title': original_metadata.get('sharepoint_title', sharepoint_doc.get('title', '')),
+        'author': original_metadata.get('sharepoint_author', ''),
+        'created_date': original_metadata.get('sharepoint_created', ''),
+        'modified_date': original_metadata.get('sharepoint_modified', ''),
+        'created_by': original_metadata.get('sharepoint_author', 'system'),
+        
+        # Access control metadata (converted from V2 template ACL fields)
+        'access_users': '|'.join(acl_data.get('allowed_users', [])),
+        'access_groups': '|'.join(acl_data.get('allowed_groups', [])),
+        'denied_users': '|'.join(acl_data.get('denied_users', [])),
+        'denied_groups': '|'.join(acl_data.get('denied_groups', [])),
+        
+        # V2 Template Enhancement: Permission level tracking
+        'permission_summary': create_permission_summary(acl_data.get('permission_levels', {})),
+        'has_full_control_users': has_permission_level(acl_data, 'full_control'),
+        'has_contribute_access': has_permission_level(acl_data, 'contribute'),
+        'has_read_only_access': has_permission_level(acl_data, 'read'),
+        
+        # V2 Template Enhanced classification based on permission complexity
+        'classification': determine_classification_from_acl_v2(acl_data),
+        'department': extract_department_from_groups(acl_data.get('allowed_groups', [])),
+        
+        # V2 Template Permission inheritance tracking
+        'has_inherited_permissions': has_inherited_permissions(acl_data),
+        'has_direct_permissions': has_direct_permissions(acl_data),
+        
+        # Additional V2 template fields
+        'sharepoint_site': extract_site_from_uri(sharepoint_doc.get('uri', '')),
+        'sharepoint_file_extension': original_metadata.get('sharepoint_file_extension', ''),
+    }
+    
+    return {
+        'content': sharepoint_doc.get('content', ''),
+        'metadata': bedrock_metadata,
+        'filename': generate_filename_from_sharepoint_doc(sharepoint_doc)
+    }
+
 def convert_sharepoint_to_bedrock_format(sharepoint_doc: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convert SharePoint document with ACL to Bedrock Knowledge Base format with metadata.
+    Now uses the V2 template-based conversion for enhanced metadata.
     """
-    try:
-        acl_data = sharepoint_doc.get('acl_data', {})
-        original_metadata = sharepoint_doc.get('metadata', {})
-        
-        # Convert SharePoint ACL to Bedrock metadata format
-        bedrock_metadata = {
-            # Source information
-            'source': 'sharepoint',
-            'source_type': 'sharepoint_page',
-            'sharepoint_uri': sharepoint_doc.get('uri', ''),
-            'sharepoint_id': sharepoint_doc.get('id', ''),
-            
-            # Content metadata
-            'title': sharepoint_doc.get('title', ''),
-            'content_type': original_metadata.get('ContentType', 'SharePoint Page'),
-            'created_date': original_metadata.get('Created', datetime.utcnow().strftime('%Y-%m-%d')),
-            'modified_date': original_metadata.get('Modified', datetime.utcnow().strftime('%Y-%m-%d')),
-            'author': original_metadata.get('Author', ''),
-            
-            # Access control metadata (converted from SharePoint ACL)
-            'access_users': '|'.join(acl_data.get('allowed_users', [])),
-            'access_groups': '|'.join(acl_data.get('allowed_groups', [])),
-            'denied_users': '|'.join(acl_data.get('denied_users', [])),
-            'denied_groups': '|'.join(acl_data.get('denied_groups', [])),
-            
-            # Classification based on SharePoint site/permissions
-            'classification': determine_classification_from_acl(acl_data),
-            'department': extract_department_from_groups(acl_data.get('allowed_groups', [])),
-            
-            # Additional SharePoint metadata
-            'sharepoint_site': extract_site_from_uri(sharepoint_doc.get('uri', '')),
-            'sharepoint_list': original_metadata.get('List', ''),
-            'sharepoint_library': original_metadata.get('Library', '')
-        }
-        
-        return {
-            'content': sharepoint_doc.get('content', ''),
-            'metadata': bedrock_metadata,
-            'filename': generate_filename_from_sharepoint_doc(sharepoint_doc)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error converting SharePoint document: {str(e)}")
-        raise
+    # Use the V2 template-based conversion for all SharePoint documents
+    return convert_sharepoint_to_bedrock_format_v2(sharepoint_doc)
 
 def determine_classification_from_acl(acl_data: Dict[str, Any]) -> str:
     """
@@ -344,6 +640,71 @@ def extract_site_from_uri(uri: str) -> str:
         return 'unknown'
     except:
         return 'unknown'
+
+def create_permission_summary(permission_levels: Dict[str, Any]) -> str:
+    """Create a summary of permission levels for advanced filtering."""
+    summary_parts = []
+    for principal, details in permission_levels.items():
+        permissions = details.get('permissions', [])
+        if permissions:
+            highest_permission = get_highest_permission(permissions)
+            summary_parts.append(f"{principal}:{highest_permission}")
+    return '|'.join(summary_parts)
+
+def get_highest_permission(permissions: List[str]) -> str:
+    """Determine the highest permission level from a list."""
+    permission_hierarchy = ['read', 'contribute', 'design', 'full_control']
+    for perm in reversed(permission_hierarchy):
+        if perm in [p.lower() for p in permissions]:
+            return perm
+    return 'read'  # Default to read if no match
+
+def has_permission_level(acl_data: Dict[str, Any], target_permission: str) -> bool:
+    """Check if any principal has the specified permission level."""
+    permission_levels = acl_data.get('permission_levels', {})
+    for details in permission_levels.values():
+        permissions = [p.lower() for p in details.get('permissions', [])]
+        if target_permission.lower() in permissions:
+            return True
+    return False
+
+def has_inherited_permissions(acl_data: Dict[str, Any]) -> bool:
+    """Check if document has inherited permissions."""
+    permission_levels = acl_data.get('permission_levels', {})
+    return any(details.get('inheritance') == 'inherited' 
+              for details in permission_levels.values())
+
+def has_direct_permissions(acl_data: Dict[str, Any]) -> bool:
+    """Check if document has direct (non-inherited) permissions."""
+    permission_levels = acl_data.get('permission_levels', {})
+    return any(details.get('inheritance') == 'direct' 
+              for details in permission_levels.values())
+
+def determine_classification_from_acl_v2(acl_data: Dict[str, Any]) -> str:
+    """Enhanced classification determination using V2 permission data."""
+    permission_levels = acl_data.get('permission_levels', {})
+    allowed_groups = acl_data.get('allowed_groups', [])
+    allowed_users = acl_data.get('allowed_users', [])
+    
+    # Check for full control permissions (highly sensitive)
+    full_control_count = sum(1 for details in permission_levels.values() 
+                           if 'full_control' in [p.lower() for p in details.get('permissions', [])])
+    
+    # Check for public access indicators
+    public_indicators = ['Everyone', 'All Users', 'Company Users', 'All Employees', 'Authenticated Users']
+    has_public_access = any(group in allowed_groups for group in public_indicators)
+    
+    # Enhanced classification logic
+    if full_control_count <= 2 and len(allowed_users) <= 3:
+        return 'restricted'  # Very limited access
+    elif full_control_count <= 5 and not has_public_access:
+        return 'confidential'  # Limited access, no public groups
+    elif has_public_access:
+        return 'internal'  # Company-wide access
+    elif len(allowed_groups) <= 3:
+        return 'confidential'  # Department-level access
+    else:
+        return 'internal'  # Default to internal
 
 def generate_filename_from_sharepoint_doc(doc: Dict[str, Any]) -> str:
     """

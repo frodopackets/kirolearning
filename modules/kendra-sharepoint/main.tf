@@ -181,112 +181,119 @@ resource "aws_secretsmanager_secret_version" "jwt_signing_key" {
   }
 }
 
-# SharePoint Online Data Source V2
+# SharePoint Online Data Source V2 (Template-based)
 resource "aws_kendra_data_source" "sharepoint_connector" {
   index_id    = aws_kendra_index.sharepoint_index.id
   name        = "sharepoint-online-connector-v2"
-  type        = "SHAREPOINT"
-  description = "SharePoint Online connector V2 with enhanced ACL synchronization"
+  type        = "TEMPLATE"
+  description = "SharePoint Online connector V2 with enhanced ACL synchronization using template configuration"
   role_arn    = aws_iam_role.kendra_role.arn
 
   configuration {
-    sharepoint_configuration {
-      sharepoint_version = "SHAREPOINT_ONLINE"
-      
-      urls = var.sharepoint_urls
-      
-      secret_arn = aws_secretsmanager_secret.sharepoint_credentials.arn
-      
-      # SharePoint Connector V2 Enhanced Features
-      crawl_attachments                = false  # Focus on pages, not attachments
-      use_change_log                  = true   # Incremental sync with better performance
-      disable_local_groups            = false  # Include local SharePoint groups for ACL
-      
-      # V2 Enhanced Authentication
-      authentication_type = "HTTP_BASIC"  # V2 supports multiple auth types
-      
-      # V2 Enhanced Content Types
-      document_title_field_name = "Title"
-      
-      # V2 Enhanced Field Mappings with better metadata extraction
-      field_mappings {
-        data_source_field_name = "Author"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"  # V2 supports milliseconds
-        index_field_name      = "sharepoint_author"
-      }
-      
-      field_mappings {
-        data_source_field_name = "Created"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        index_field_name      = "sharepoint_created"
-      }
-      
-      field_mappings {
-        data_source_field_name = "Modified"
-        date_field_format     = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        index_field_name      = "sharepoint_modified"
-      }
-      
-      field_mappings {
-        data_source_field_name = "Title"
-        index_field_name      = "sharepoint_title"
-      }
-      
-      # V2 Enhanced metadata fields
-      field_mappings {
-        data_source_field_name = "ContentType"
-        index_field_name      = "sharepoint_content_type"
-      }
-      
-      field_mappings {
-        data_source_field_name = "FileExtension"
-        index_field_name      = "sharepoint_file_extension"
-      }
-      
-      field_mappings {
-        data_source_field_name = "SiteUrl"
-        index_field_name      = "sharepoint_site_url"
-      }
-      
-      field_mappings {
-        data_source_field_name = "WebUrl"
-        index_field_name      = "sharepoint_web_url"
-      }
-      
-      # V2 Enhanced ACL configuration with better granularity
-      access_control_list_configuration {
-        key_path = "sharepoint_acl_v2"  # V2 ACL field with enhanced structure
-      }
-      
-      # V2 Enhanced inclusion/exclusion patterns
-      inclusion_patterns = [
-        "*/SitePages/*",      # Include all site pages
-        "*/Lists/*",          # Include list items
-        "*/Shared Documents/*" # Include shared documents
-      ]
-      
-      exclusion_patterns = [
-        "*/Forms/*",          # Exclude SharePoint forms
-        "*/Style Library/*",  # Exclude style libraries
-        "*/_catalogs/*",      # Exclude system catalogs
-        "*/bin/*"            # Exclude binary folders
-      ]
-      
-      # V2 Enhanced VPC configuration
-      vpc_configuration {
-        subnet_ids         = var.private_subnet_ids
-        security_group_ids = [var.kendra_security_group_id]
+    template_configuration {
+      template {
+        # SharePoint Connector V2 Template
+        template_name = "SharePointOnlineV2"
+        template_version = "2.0"
+        
+        # V2 Template Configuration
+        template_parameters = {
+          # Connection Configuration
+          "sharePointUrls" = jsonencode(var.sharepoint_urls)
+          "secretArn" = aws_secretsmanager_secret.sharepoint_credentials.arn
+          "authenticationType" = "HTTP_BASIC"
+          
+          # V2 Enhanced Crawling Configuration
+          "crawlAttachments" = "false"
+          "useChangeLog" = "true"
+          "disableLocalGroups" = "false"
+          "enableAclV2" = "true"  # V2 Enhanced ACL processing
+          
+          # V2 Enhanced Field Mappings
+          "fieldMappings" = jsonencode([
+            {
+              "dataSourceFieldName" = "Author"
+              "dateFieldFormat" = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+              "indexFieldName" = "sharepoint_author"
+            },
+            {
+              "dataSourceFieldName" = "Created"
+              "dateFieldFormat" = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+              "indexFieldName" = "sharepoint_created"
+            },
+            {
+              "dataSourceFieldName" = "Modified"
+              "dateFieldFormat" = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+              "indexFieldName" = "sharepoint_modified"
+            },
+            {
+              "dataSourceFieldName" = "Title"
+              "indexFieldName" = "sharepoint_title"
+            },
+            {
+              "dataSourceFieldName" = "ContentType"
+              "indexFieldName" = "sharepoint_content_type"
+            },
+            {
+              "dataSourceFieldName" = "FileExtension"
+              "indexFieldName" = "sharepoint_file_extension"
+            },
+            {
+              "dataSourceFieldName" = "SiteUrl"
+              "indexFieldName" = "sharepoint_site_url"
+            },
+            {
+              "dataSourceFieldName" = "WebUrl"
+              "indexFieldName" = "sharepoint_web_url"
+            }
+          ])
+          
+          # V2 Enhanced ACL Configuration
+          "aclConfiguration" = jsonencode({
+            "keyPath" = "sharepoint_acl_v2"
+            "enableInheritanceTracking" = true
+            "enablePermissionLevelTracking" = true
+            "enablePrincipalTypeTracking" = true
+          })
+          
+          # V2 Enhanced Content Filtering
+          "inclusionPatterns" = jsonencode([
+            "*/SitePages/*",
+            "*/Lists/*", 
+            "*/Shared Documents/*"
+          ])
+          
+          "exclusionPatterns" = jsonencode([
+            "*/Forms/*",
+            "*/Style Library/*",
+            "*/_catalogs/*",
+            "*/bin/*"
+          ])
+          
+          # V2 VPC Configuration
+          "vpcConfiguration" = jsonencode({
+            "subnetIds" = var.private_subnet_ids
+            "securityGroupIds" = [var.kendra_security_group_id]
+          })
+          
+          # V2 Enhanced Sync Configuration
+          "syncMode" = "INCREMENTAL"
+          "maxConcurrentConnections" = "10"
+          "requestTimeout" = "300"
+          "retryAttempts" = "3"
+        }
       }
     }
   }
 
-  # V2 Enhanced scheduling with better error handling
+  # V2 Enhanced scheduling
   schedule = "cron(0 6 * * ? *)"  # Daily at 6 AM UTC
 
   tags = {
     Name    = "sharepoint-online-connector-v2"
     Purpose = "SharePoint Content Sync V2"
     Version = "V2"
+    Type    = "Template"
   }
 }
 
