@@ -19,6 +19,7 @@ This project deploys a **complete CIS-compliant RAG (Retrieval-Augmented Generat
 - **Lambda in VPC**: Orchestration API runs in private subnets
 - **Metadata Filtering**: User/group-based access control
 - **Dual Modes**: Document retrieval and RAG generation
+- **Prompt Caching**: Claude prompt caching for improved performance and cost reduction
 
 ### Network Security
 - **VPC Infrastructure**: Private subnets, NAT gateways, and VPC endpoints
@@ -120,7 +121,7 @@ import requests
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 
-def query_private_api(query, user_id, user_groups):
+def query_private_api(query, user_id, user_groups, use_caching=True):
     # Private API endpoint (only accessible from VPC)
     api_url = "https://[api-id].execute-api.us-east-1.amazonaws.com/prod/query"
     
@@ -128,7 +129,8 @@ def query_private_api(query, user_id, user_groups):
         "query": query,
         "user_id": user_id,
         "user_groups": user_groups,
-        "type": "retrieve_and_generate"
+        "type": "retrieve_and_generate",
+        "use_caching": use_caching  # Enable prompt caching for better performance
     }
     
     # Sign request with AWS credentials
@@ -151,7 +153,40 @@ def query_private_api(query, user_id, user_groups):
     )
     
     return response.json()
+
+# Example with caching enabled (default)
+result = query_private_api(
+    query="What are the key financial metrics for Q4?",
+    user_id="john.doe@company.com",
+    user_groups=["finance", "executives"],
+    use_caching=True
+)
+
+# Check if response used cached prompts
+if result.get("cached"):
+    print(f"✅ Used cached prompt - saved tokens!")
+    print(f"Cache performance: {result.get('cache_performance', {})}")
 ```
+
+### Prompt Caching Benefits
+
+The system includes **Claude prompt caching** for significant performance and cost improvements:
+
+**🚀 Performance Benefits:**
+- **Faster Response Times**: Cached system prompts reduce processing latency
+- **Reduced Token Usage**: System prompts are cached and reused across requests
+- **Better Throughput**: Handle more concurrent requests efficiently
+
+**💰 Cost Benefits:**
+- **Lower API Costs**: Cached prompts reduce billable tokens by up to 90%
+- **Efficient Resource Usage**: Less compute time per request
+- **Scalable Economics**: Cost per query decreases with usage volume
+
+**🔧 How It Works:**
+1. **System Prompt Caching**: RAG instructions are cached for 1 hour (configurable)
+2. **User Context Grouping**: Cache keys include user groups for appropriate access
+3. **Automatic Management**: Cache expiration and refresh handled automatically
+4. **Performance Monitoring**: Detailed metrics on cache hit rates and token savings
 
 ### 3. Streamlit Frontend Integration (VPC Deployment Required)
 

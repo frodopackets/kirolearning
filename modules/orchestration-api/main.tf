@@ -99,6 +99,8 @@ resource "aws_lambda_function" "orchestration_api" {
     variables = {
       KNOWLEDGE_BASE_ID = var.knowledge_base_id
       OPENSEARCH_ENDPOINT = var.opensearch_collection_endpoint
+      ENABLE_PROMPT_CACHING = "true"
+      CACHE_TTL_MINUTES = "60"
     }
   }
 
